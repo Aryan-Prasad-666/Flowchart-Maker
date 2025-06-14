@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flowchart Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Keyframes for spinner animation */
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .animate-spin {
+            animation: spin 1s linear infinite;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 min-h-screen flex flex-col text-gray-100">
+    <header class="bg-gradient-to-r from-indigo-800 to-blue-900 text-white py-6">
+        <div class="container mx-auto px-4">
+            <h1 class="text-3xl font-bold">Flowchart Generator</h1>
+            <p class="mt-2 text-lg text-gray-300">Create and preview flowcharts from your descriptions</p>
+        </div>
+    </header>
+
+    <main class="container mx-auto px-4 py-8 flex-grow relative">
+        <!-- Loading Spinner -->
+        <div id="loading-spinner" class="hidden fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50" role="status" aria-live="polite">
+            <div class="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+            <span class="sr-only">Generating flowcharts...</span>
+        </div>
+
+        {% if error %}
+            <div class="bg-red-800 border-l-4 border-red-600 text-red-100 p-4 mb-6 rounded" role="alert">
+                {{ error }}
+            </div>
+        {% endif %}
+
+        <form id="flowchart-form" method="POST" class="bg-gray-800 p-6 rounded-lg shadow-md border border-gray-700 mb-8">
+            <label for="description" class="block text-lg font-medium text-gray-200 mb-2">
+                Enter Flowchart Description
+            </label>
+            <textarea
+                id="description"
+                name="description"
+                placeholder="e.g., A process starts, checks if a number is positive, then outputs the result or generate flowcharts for Machine Learning Model making process."
+                class="w-full h-40 p-4 border border-gray-600 bg-gray-700 text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
+            ></textarea>
+            <button
+                type="submit"
+                class="mt-4 px-6 py-3 bg-blue-700 text-white font-semibold rounded-lg hover:bg-blue-800 transition duration-200"
+            >
+                Generate Flowchart
+            </button>
+        </form>
+
+        {% if result and result.variants %}
+            <h2 class="text-2xl font-semibold text-gray-100 mb-6">Generated Flowchart Variants</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {% for variant in result.variants %}
+                    <div class="bg-gray-800 p-8 rounded-lg shadow-md border border-gray-700">
+                        <h3 class="text-xl font-medium text-gray-200 mb-4">{{ variant.name }}</h3>
+                        {% if variant.error %}
+                            <div class="bg-red-800 border-l-4 border-red-600 text-red-100 p-4 rounded">
+                                {{ variant.error }}
+                            </div>
+                        {% else %}
+                            <div class="space-y-6">
+                                <div>
+                                    <strong class="text-gray-400">PNG Output</strong>
+                                    {% if variant.png_path and variant.png_path|length %}
+                                        <div class="mt-2">
+                                            <img
+                                                src="{{ url_for('static', filename=variant.png_path|replace('static/', '')) }}"
+                                                alt="{{ variant.name }} PNG"
+                                                class="w-full max-w-full h-auto max-h-96 object-contain border border-gray-600 rounded"
+                                            >
+                                            <a
+                                                href="{{ url_for('download', file_type='png', variant_id=variant.id) }}"
+                                                class="mt-2 inline-block text-blue-500 hover:text-blue-400"
+                                            >
+                                                Download PNG
+                                            </a>
+                                        </div>
+                                    {% else %}
+                                        <p class="text-gray-500">PNG file not available</p>
+                                    {% endif %}
+                                </div>
+                                <div>
+                                    <strong class="text-gray-400">SVG Output</strong>
+                                    {% if variant.svg_path and variant.svg_path|length %}
+                                        <a
+                                            href="{{ url_for('download', file_type='svg', variant_id=variant.id) }}"
+                                            class="inline-block text-blue-500 hover:text-blue-400"
+                                        >
+                                            Download SVG
+                                        </a>
+                                    {% else %}
+                                        <p class="text-gray-500">SVG file not available</p>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    </main>
+
+    <footer class="bg-gray-950 text-gray-400 py-4">
+        <div class="container mx-auto px-4 text-center">
+            <p>© 2025 Flowchart Generator. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <script>
+        // Show loading spinner on form submit
+        document.getElementById('flowchart-form').addEventListener('submit', function() {
+            document.getElementById('loading-spinner').classList.remove('hidden');
+        });
+    </script>
+</body>
+</html>
