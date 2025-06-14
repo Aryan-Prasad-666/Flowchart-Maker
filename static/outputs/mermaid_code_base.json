@@ -1,3 +1,0 @@
-{
-  "mermaid_code": "graph TD\n    A[Frontend: HTML, CSS, JavaScript] --> B(Backend: Flask)\n    B --> C{Langchain}\n    B --> D{CrewAI}\n    B --> E[Database: MySQL]"
-}

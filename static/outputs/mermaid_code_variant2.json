@@ -1,3 +1,0 @@
-{
-  "mermaid_code": "%%{init: {'theme': 'base'}}%%\ngraph LR\n    A[Input Image] --> B(Convolutional Layer 1)\n    B --> C(ReLU 1)\n    C --> D(Pooling Layer 1)\n    D --> E(Convolutional Layer 2)\n    E --> F(ReLU 2)\n    F --> G(Pooling Layer 2)\n    G --> H(Flatten)\n    H --> I(Fully Connected Layer 1)\n    I --> J(ReLU 3)\n    J --> K(Dropout)\n    K --> L(Fully Connected Layer 2)\n    L --> M(Softmax)\n    M --> N[Output Classes]"
-}

@@ -1,3 +1,0 @@
-{
-  "mermaid_code": "graph LR\n    %%{init: {'theme': 'base'}}%%\n    subgraph CNN Architecture\n    A[Input Image] --> B{Convolutional Layer 1}\n    B --> C{ReLU Activation 1}\n    C --> D{Pooling Layer 1}\n    D --> E{Convolutional Layer 2}\n    E --> F{ReLU Activation 2}\n    F --> G{Pooling Layer 2}\n    G --> H{Fully Connected Layer 1}\n    H --> I{ReLU Activation 3}\n    I --> J{Fully Connected Layer 2}\n    J --> K[Output Classes]\n    end"
-}
