@@ -2,9 +2,10 @@ from flask import Flask, render_template, request, send_file, jsonify
 import json
 import os
 import re
-import subprocess
+import requests
 from crewai import Agent, Crew, LLM, Task
 from dotenv import load_dotenv
+from collections import deque
 
 app = Flask(__name__)
 load_dotenv()
@@ -12,31 +13,43 @@ load_dotenv()
 OUTPUT_DIR = os.path.join(os.getcwd(), 'static', 'outputs')
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+# Keep only the last N runs to avoid filling disk
+MAX_FILES = 30
+def cleanup_old_files():
+    files = sorted(
+        [os.path.join(OUTPUT_DIR, f) for f in os.listdir(OUTPUT_DIR)],
+        key=os.path.getmtime
+    )
+    if len(files) > MAX_FILES:
+        for old in files[:-MAX_FILES]:
+            try:
+                os.remove(old)
+            except Exception:
+                pass
+
+def extract_json(content):
+    """Extract the first JSON object from raw text safely."""
+    match = re.search(r'(\{.*\})', content, re.DOTALL)
+    return match.group(1).strip() if match else content.strip()
+
 def clean_json_file(file_path):
     try:
         if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
             return f"JSON file {file_path} is missing or empty"
-        
+
         with open(file_path, 'r') as f:
             content = f.read().strip()
-        
+
         if not content:
             return f"JSON file {file_path} is empty after stripping"
-        
-        json_match = re.search(r'```json\n(.*?)\n```', content, re.DOTALL)
-        if json_match:
-            cleaned_content = json_match.group(1).strip()
-        else:
-            cleaned_content = content.strip()
-        
-        if not (cleaned_content.startswith('{') and cleaned_content.endswith('}')):
-            return f"Cleaned content of {file_path} does not resemble JSON"
-        
+
+        cleaned_content = extract_json(content)
+
         try:
             json.loads(cleaned_content)
         except json.JSONDecodeError as e:
             return f"Invalid JSON in {file_path} after cleaning: {str(e)}"
-        
+
         with open(file_path, 'w') as f:
             f.write(cleaned_content)
         return None
@@ -63,24 +76,52 @@ mermaid_generator = Agent(
 
 flowchart_renderer = Agent(
     role='Flowchart Renderer',
-    goal='Render Mermaid flowchart code into SVG and PNG images using the Kroki API via curl commands.',
-    backstory='You are a technical illustrator with expertise in API integrations and rendering high-quality diagrams using Kroki.',
+    goal='Render Mermaid flowchart code into SVG and PNG images using the Kroki API.',
+    backstory='You are a technical illustrator with expertise in rendering high-quality diagrams.',
     verbose=True,
     llm=gemini_llm,
     tools=[]
 )
 
-def validate_mermaid_code(code):
-    """Validate Mermaid code for basic syntax requirements."""
+def validate_mermaid_code(code: str) -> bool:
+    """Validate Mermaid code more flexibly."""
     if not code or not isinstance(code, str):
         return False
-    if 'graph' not in code.lower() or '-->' not in code:
+
+    # Must start with 'graph' and direction
+    if not re.search(r'graph\s+(TD|LR|BT|RL)', code, re.IGNORECASE):
         return False
-    if not re.search(r'[A-Za-z0-9]+\[.*?\]', code):
+
+    # Must contain at least one connection (--> or ---)
+    if not any(link in code for link in ['-->', '---']):
         return False
+
+    # Accept either [ ] style nodes OR subgraph definitions OR plain nodes
+    if not re.search(r'\[.*?\]', code) and "subgraph" not in code.lower() and re.search(r'[A-Za-z0-9]+\s*-->', code) is None:
+        return False
+
     return True
 
+
+def render_with_kroki(mermaid_code, variant, fmt):
+    """Render Mermaid code via Kroki API into SVG or PNG."""
+    url = f"https://kroki.io/mermaid/{fmt}"
+    response = requests.post(url, data=mermaid_code.encode("utf-8"))
+    if response.status_code != 200:
+        raise ValueError(f"Kroki rendering failed ({fmt}): {response.text}")
+
+    path = os.path.join(OUTPUT_DIR, variant[f"{fmt}_file"])
+    mode = "wb" if fmt == "png" else "w"
+    with open(path, mode) as f:
+        if fmt == "png":
+            f.write(response.content)
+        else:
+            f.write(response.text)
+    return f"static/outputs/{variant[f'{fmt}_file']}"
+
 def run_crew(flowchart_description):
+    cleanup_old_files()
+
     variants = [
         {'id': 1, 'name': 'Variant 1', 'json_file': 'mermaid_code_variant1.json', 'svg_file': 'flowchart_output_variant1.svg', 'png_file': 'flowchart_output_variant1.png'},
         {'id': 2, 'name': 'Variant 2', 'json_file': 'mermaid_code_variant2.json', 'svg_file': 'flowchart_output_variant2.svg', 'png_file': 'flowchart_output_variant2.png'},
@@ -94,32 +135,17 @@ def run_crew(flowchart_description):
             description=(
                 f"Based on the user-provided flowchart description, generate a unique Mermaid flowchart in JSON format:\n"
                 f"Description: {flowchart_description}\n"
-                f"This is variant {variant['id']} of 3. Create a distinct logical structure (e.g., linear, decision-based, or parallel processes) that differs from other variants but aligns with the description’s intent. "
-                f"Use simple Mermaid syntax (e.g., graph TD; A[Start] --> B[Process] --> C[End]). Include minimal styling (%%{{init: {{'theme': 'base'}}}}%%). "
-                f"Ensure the code is valid and renderable by Kroki. Output **only** a pure JSON object with a single key 'mermaid_code' containing the Mermaid code as a string, e.g., {{'mermaid_code': 'graph TD; A[Start] --> B[Process] --> C[End]'}}. "
-                f"Do **not** include ```json or ``` markers, comments, explanatory text, or any other content outside the JSON object. Any additional text will cause errors."
+                f"This is variant {variant['id']} of 3. Create a distinct logical structure (linear, branching, or parallel).\n"
+                f"Output strictly as a JSON object like: {{\"mermaid_code\": \"graph TD; A[Start] --> B[Process] --> C[End]\"}}"
             ),
             expected_output="A JSON object with valid Mermaid flowchart code under 'mermaid_code'.",
             agent=mermaid_generator,
             output_file=os.path.join(OUTPUT_DIR, variant['json_file'])
         )
 
-        render_flowchart_task = Task(
-            description=(
-                f"Using the Mermaid code from {variant['json_file']}, render it as SVG and PNG images using the Kroki API via curl commands. "
-                f"Send the code to 'https://kroki.io/mermaid/svg' and 'https://kroki.io/mermaid/png' with --data-raw. "
-                f"Save the SVG to '{variant['svg_file']}' and PNG to '{variant['png_file']}' in static/outputs. "
-                f"Return a JSON object with the file paths or an error message if rendering fails."
-            ),
-            expected_output=f"A JSON object with paths to '{variant['svg_file']}' and '{variant['png_file']}' or an error message.",
-            agent=flowchart_renderer,
-            output_file=os.path.join(OUTPUT_DIR, f"flowchart_result_variant{variant['id']}.json"),
-            context=[generate_mermaid_task]
-        )
-
         crew = Crew(
-            agents=[mermaid_generator, flowchart_renderer],
-            tasks=[generate_mermaid_task, render_flowchart_task],
+            agents=[mermaid_generator],
+            tasks=[generate_mermaid_task],
             verbose=True
         )
 
@@ -129,57 +155,38 @@ def run_crew(flowchart_description):
             if not os.path.exists(json_file):
                 result_json['variants'].append({'id': variant['id'], 'name': variant['name'], 'error': f"JSON file missing: {json_file}"})
                 continue
-            
+
             json_error = clean_json_file(json_file)
             if json_error:
                 result_json['variants'].append({'id': variant['id'], 'name': variant['name'], 'error': f"Failed to clean JSON file: {json_error}"})
                 continue
-            
-            try:
-                with open(json_file, 'r') as f:
-                    mermaid_data = json.load(f)
-                mermaid_code = mermaid_data.get('mermaid_code', '')
-                if not validate_mermaid_code(mermaid_code):
-                    result_json['variants'].append({'id': variant['id'], 'name': variant['name'], 'error': 'Invalid or empty Mermaid code generated'})
-                    continue
-            except Exception as e:
-                result_json['variants'].append({'id': variant['id'], 'name': variant['name'], 'error': f"Failed to read Mermaid code: {str(e)}"})
+
+            with open(json_file, 'r') as f:
+                mermaid_data = json.load(f)
+
+            mermaid_code = mermaid_data.get('mermaid_code', '')
+            if not validate_mermaid_code(mermaid_code):
+                result_json['variants'].append({'id': variant['id'], 'name': variant['name'], 'error': 'Invalid or empty Mermaid code'})
                 continue
 
             variant_result = {'id': variant['id'], 'name': variant['name']}
+
             try:
-                curl_svg_command = ['curl', 'https://kroki.io/mermaid/svg', '--data-raw', mermaid_code]
-                svg_path = os.path.join(OUTPUT_DIR, variant['svg_file'])
-                with open(svg_path, 'w') as svg_file:
-                    result = subprocess.run(curl_svg_command, capture_output=True, text=True, check=True)
-                    svg_file.write(result.stdout)
-                variant_result['svg_path'] = f"static/outputs/{variant['svg_file']}"
-                
-                curl_png_command = ['curl', 'https://kroki.io/mermaid/png', '--data-raw', mermaid_code]
-                png_path = os.path.join(OUTPUT_DIR, variant['png_file'])
-                with open(png_path, 'wb') as png_file:
-                    result = subprocess.run(curl_png_command, capture_output=True, check=True)
-                    png_file.write(result.stdout)
-                variant_result['png_path'] = f"static/outputs/{variant['png_file']}"
-                
-                if not os.path.exists(svg_path) or os.path.getsize(svg_path) == 0:
-                    variant_result['error'] = 'SVG file was not created or is empty'
-                elif not os.path.exists(png_path) or os.path.getsize(png_path) == 0:
-                    variant_result['error'] = 'PNG file was not created or is empty'
-                
+                variant_result['svg_path'] = render_with_kroki(mermaid_code, variant, "svg")
+                variant_result['png_path'] = render_with_kroki(mermaid_code, variant, "png")
+
                 result_file = os.path.join(OUTPUT_DIR, f"flowchart_result_variant{variant['id']}.json")
                 with open(result_file, 'w') as f:
                     json.dump(variant_result, f, indent=2)
-                
+
                 result_json['variants'].append(variant_result)
-            except subprocess.CalledProcessError as e:
-                error_msg = f"Failed to render images for variant {variant['id']}: {e.stderr}"
-                variant_result['error'] = error_msg
+            except Exception as e:
+                variant_result['error'] = f"Rendering failed: {str(e)}"
                 result_json['variants'].append(variant_result)
+
         except Exception as e:
-            error_msg = f"Error during crew execution for variant {variant['id']}: {str(e)}"
-            result_json['variants'].append({'id': variant['id'], 'name': variant['name'], 'error': error_msg})
-    
+            result_json['variants'].append({'id': variant['id'], 'name': variant['name'], 'error': f"Crew execution error: {str(e)}"})
+
     return result_json
 
 @app.route('/', methods=['GET', 'POST'])
@@ -193,14 +200,14 @@ def index():
         else:
             result = run_crew(flowchart_description)
             if not result.get('variants'):
-                error = "No flowchart variants were generated. Check server logs for details."
-            elif all('error' in variant for variant in result['variants']):
-                error = "Errors occurred in all variants: " + "; ".join(v['error'] for v in result['variants'] if v.get('error'))
+                error = "No flowchart variants were generated."
+            elif all('error' in v for v in result['variants']):
+                error = "All variants failed: " + "; ".join(v['error'] for v in result['variants'])
                 result = None
-            elif any('error' in variant for variant in result['variants']):
-                error = "Some variants failed to generate. Check the details below."
-    
-    return render_template('index.html', result=result, error=error)
+            elif any('error' in v for v in result['variants']):
+                error = "Some variants failed. See details below."
+
+    return render_template('index.html', result=result or {}, error=error)
 
 @app.route('/download/<file_type>/<variant_id>')
 def download(file_type, variant_id):
@@ -211,32 +218,12 @@ def download(file_type, variant_id):
     }
     if variant_id not in variant_files or file_type not in ['svg', 'png']:
         return jsonify({'error': 'Invalid file type or variant ID'}), 400
-    
+
     file_path = os.path.join(OUTPUT_DIR, variant_files[variant_id][file_type])
-    
-    if not os.path.exists(file_path):
-        return jsonify({'error': f'{file_type.upper()} file not found for variant {variant_id}'}), 404
-    
-    if os.path.getsize(file_path) == 0:
-        return jsonify({'error': f'{file_type.upper()} file is empty for variant {variant_id}'}), 404
-    
-    try:
-        with open(file_path, 'rb') as f:
-            header = f.read(50)
-            if file_type == 'png':
-                if header[:8] != b'\x89PNG\r\n\x1a\n':
-                    return jsonify({'error': f'Invalid PNG file for variant {variant_id}'}), 404
-            elif file_type == 'svg':
-                header_str = header.decode('utf-8', errors='ignore').lower()
-                if not ('<?xml' in header_str or '<svg' in header_str):
-                    return jsonify({'error': f'Invalid SVG file for variant {variant_id}'}), 404
-    except Exception as e:
-        return jsonify({'error': f'Error validating {file_type.upper()} file for variant {variant_id}'}), 404
-    
-    try:
-        return send_file(file_path, as_attachment=True, download_name=variant_files[variant_id][file_type])
-    except Exception as e:
-        return jsonify({'error': f'Failed to download {file_type.upper()} file for variant {variant_id}'}), 500
+    if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+        return jsonify({'error': f'{file_type.upper()} file missing or empty for variant {variant_id}'}), 404
+
+    return send_file(file_path, as_attachment=True, download_name=variant_files[variant_id][file_type])
 
 if __name__ == '__main__':
     app.run(debug=True)
