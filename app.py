@@ -67,7 +67,7 @@ gemini_llm = LLM(
 
 mermaid_generator = Agent(
     role='Mermaid Code Generator',
-    goal='Generate three distinct Mermaid flowchart interpretations with unique logical structures based on a user-provided description.',
+    goal='Generate six distinct Mermaid flowchart interpretations with unique logical structures based on a user-provided description.',
     backstory='You are an expert in diagramming, skilled in creating valid and diverse Mermaid syntax for flowcharts.',
     verbose=True,
     llm=gemini_llm,
@@ -102,7 +102,6 @@ def validate_mermaid_code(code: str) -> bool:
 
     return True
 
-
 def render_with_kroki(mermaid_code, variant, fmt):
     """Render Mermaid code via Kroki API into SVG or PNG."""
     url = f"https://kroki.io/mermaid/{fmt}"
@@ -125,7 +124,10 @@ def run_crew(flowchart_description):
     variants = [
         {'id': 1, 'name': 'Variant 1', 'json_file': 'mermaid_code_variant1.json', 'svg_file': 'flowchart_output_variant1.svg', 'png_file': 'flowchart_output_variant1.png'},
         {'id': 2, 'name': 'Variant 2', 'json_file': 'mermaid_code_variant2.json', 'svg_file': 'flowchart_output_variant2.svg', 'png_file': 'flowchart_output_variant2.png'},
-        {'id': 3, 'name': 'Variant 3', 'json_file': 'mermaid_code_variant3.json', 'svg_file': 'flowchart_output_variant3.svg', 'png_file': 'flowchart_output_variant3.png'}
+        {'id': 3, 'name': 'Variant 3', 'json_file': 'mermaid_code_variant3.json', 'svg_file': 'flowchart_output_variant3.svg', 'png_file': 'flowchart_output_variant3.png'},
+        {'id': 4, 'name': 'Variant 4', 'json_file': 'mermaid_code_variant4.json', 'svg_file': 'flowchart_output_variant4.svg', 'png_file': 'flowchart_output_variant4.png'},
+        {'id': 5, 'name': 'Variant 5', 'json_file': 'mermaid_code_variant5.json', 'svg_file': 'flowchart_output_variant5.svg', 'png_file': 'flowchart_output_variant5.png'},
+        {'id': 6, 'name': 'Variant 6', 'json_file': 'mermaid_code_variant6.json', 'svg_file': 'flowchart_output_variant6.svg', 'png_file': 'flowchart_output_variant6.png'}
     ]
 
     result_json = {'variants': []}
@@ -135,7 +137,7 @@ def run_crew(flowchart_description):
             description=(
                 f"Based on the user-provided flowchart description, generate a unique Mermaid flowchart in JSON format:\n"
                 f"Description: {flowchart_description}\n"
-                f"This is variant {variant['id']} of 3. Create a distinct logical structure (linear, branching, or parallel).\n"
+                f"This is variant {variant['id']} of 6. Create a distinct logical structure (linear, branching, or parallel).\n"
                 f"Output strictly as a JSON object like: {{\"mermaid_code\": \"graph TD; A[Start] --> B[Process] --> C[End]\"}}"
             ),
             expected_output="A JSON object with valid Mermaid flowchart code under 'mermaid_code'.",
@@ -214,7 +216,10 @@ def download(file_type, variant_id):
     variant_files = {
         '1': {'svg': 'flowchart_output_variant1.svg', 'png': 'flowchart_output_variant1.png'},
         '2': {'svg': 'flowchart_output_variant2.svg', 'png': 'flowchart_output_variant2.png'},
-        '3': {'svg': 'flowchart_output_variant3.svg', 'png': 'flowchart_output_variant3.png'}
+        '3': {'svg': 'flowchart_output_variant3.svg', 'png': 'flowchart_output_variant3.png'},
+        '4': {'svg': 'flowchart_output_variant4.svg', 'png': 'flowchart_output_variant4.png'},
+        '5': {'svg': 'flowchart_output_variant5.svg', 'png': 'flowchart_output_variant5.png'},
+        '6': {'svg': 'flowchart_output_variant6.svg', 'png': 'flowchart_output_variant6.png'}
     }
     if variant_id not in variant_files or file_type not in ['svg', 'png']:
         return jsonify({'error': 'Invalid file type or variant ID'}), 400
